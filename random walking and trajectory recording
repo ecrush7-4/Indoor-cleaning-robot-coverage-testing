@@ -1,0 +1,80 @@
+"""coverage_controller - 随机行走 + 轨迹记录."""
+
+from controller import Robot
+import csv
+import os
+import random
+
+robot = Robot()
+timestep = int(robot.getBasicTimeStep())
+
+# 获取设备
+devices = {}
+for i in range(robot.getNumberOfDevices()):
+    d = robot.getDeviceByIndex(i)
+    devices[d.getName()] = d
+
+# 电机
+rm = devices.get('MotorRight')
+lm = devices.get('MotorLeft')
+rm.setPosition(float('inf'))
+lm.setPosition(float('inf'))
+
+# 距离传感器（避障用）
+ds_f = devices.get('distance sensor')
+ds_l = devices.get('distance Left')
+ds_r = devices.get('distance Right')
+if ds_f: ds_f.enable(timestep)
+if ds_l: ds_l.enable(timestep)
+if ds_r: ds_r.enable(timestep)
+
+# GPS
+gps = devices.get('gps')
+if gps is None:
+    print("ERROR: 请先在场景树中添加 GPS 设备，name='gps'")
+    exit(1)
+gps.enable(timestep)
+
+# 轨迹记录
+csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trajectory.csv")
+csv_file = open(csv_path, 'w', newline='')
+writer = csv.writer(csv_file)
+writer.writerow(['time', 'x', 'z'])
+
+# 随机行走状态
+BASE = 3.0
+state = 'forward'
+state_timer = 0
+
+while robot.step(timestep) != -1:
+    # 读取传感器
+    f = ds_f.getValue() if ds_f else 9999
+    l = ds_l.getValue() if ds_l else 9999
+    r = ds_r.getValue() if ds_r else 9999
+    
+    # 随机行走 + 避障
+    if state == 'forward':
+        if f < 500:
+            state = random.choice(['turn_left', 'turn_right'])
+            state_timer = random.randint(30, 90)  # 转 1~3 秒
+        else:
+            rm.setVelocity(-BASE)
+            lm.setVelocity(-BASE)
+    elif state == 'turn_left':
+        rm.setVelocity(-BASE)
+        lm.setVelocity(BASE)
+        state_timer -= 1
+        if state_timer <= 0:
+            state = 'forward'
+    elif state == 'turn_right':
+        rm.setVelocity(BASE)
+        lm.setVelocity(-BASE)
+        state_timer -= 1
+        if state_timer <= 0:
+            state = 'forward'
+    
+    # 记录位置
+    pos = gps.getValues()
+    writer.writerow([robot.getTime(), pos[0], pos[2]])
+
+csv_file.close()
